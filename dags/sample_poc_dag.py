@@ -10,4 +10,5 @@ with DAG(
 ) as dag:
     t1 = BashOperator(task_id='echo_hello', bash_command='echo "Hello from pod!"')
     t2 = BashOperator(task_id='sleep', bash_command='sleep 5')
-    t1 >> t2
+    t3 = BashOperator(task_id='echo_world', bash_command='echo "World"')
+    t1 >> t2 >> t3
