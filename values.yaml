@@ -51,25 +51,16 @@ webserver:
       cpu: 100m
       memory: 256Mi
 
-workers:
-  nodeSelector:
-    role: airflow-worker
-  tolerations:
-    - key: "role"
-      operator: "Equal"
-      value: "airflow-worker"
-      effect: "NoSchedule"
-  resources:
-    requests:
-      cpu: 200m
-      memory: 512Mi
-
 postgresql:
   enabled: true
 
 config:
   metrics:
     statsd_on: true
+  kubernetes:
+    delete_worker_pods: false
+    node_selectors:
+      role: airflow-worker
 
 statsd:
   enabled: true

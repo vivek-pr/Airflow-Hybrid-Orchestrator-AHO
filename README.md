@@ -1,146 +1,63 @@
-# Airflow Hybrid Orchestrator
+# Airflow Hybrid Orchestrator POC
 
-This repository provides configuration for deploying Apache Airflow 3 on Kubernetes using the official Helm chart.
+This repository contains a complete proof‑of‑concept for running **Apache Airflow 3** on a local [Minikube](https://minikube.sigs.k8s.io/) Kubernetes cluster using the **KubernetesExecutor**.  The control plane (Scheduler and Webserver) is pinned to one node while task pods run on a separate worker node, demonstrating a clear separation between orchestration and execution layers.
 
-## Contents
-- `values.yaml`: Custom values enabling `KubernetesExecutor`, persistent DAG and log volumes, node selectors and tolerations for control and worker nodes, a NodePort webserver service, built-in PostgreSQL, and StatsD metrics.
-- `minikube-config.yaml`: Example Minikube cluster configuration with separate control-plane and worker nodes and host path mounts for DAGs and logs.
+## Architecture
+- **Control plane** – Airflow Scheduler and Webserver run on the node labelled `role=airflow-control`.
+- **Data plane** – every task is executed as a separate pod scheduled on the node labelled `role=airflow-worker`.
+- **Shared volumes** – DAGs and logs are stored on host directories and exposed to the cluster through `hostPath` PersistentVolumes.
+
+## Repository Layout
+```
+├── Makefile                # one‑click deployment and teardown
+├── minikube-profile.yaml   # example multi‑node Minikube profile
+├── values.yaml             # Helm values overriding the official chart
+├── dags/
+│   └── poc_test_dag.py     # sample DAG with echo and sleep tasks
+├── logs/                   # hostPath log directory
+├── tests/
+│   └── test_poc.sh         # automated validation script
+└── README.md
+```
 
 ## Prerequisites
-- Helm 3
-- `kubectl` with access to a Kubernetes cluster (e.g., Minikube using `minikube-config.yaml`)
+- Linux host with Docker
+- [Minikube](https://minikube.sigs.k8s.io/) 1.32+
+- [Helm](https://helm.sh/) 3.x
+- `kubectl` and `make`
 
-## Deployment
-
-Add or update the Airflow Helm repository:
-
+## One‑Click Deployment
 ```bash
-helm repo add apache-airflow https://airflow.apache.org
-helm repo update
+make deploy
 ```
+This target performs the following:
+1. Starts Minikube with two nodes and mounts the repository into the cluster.
+2. Labels the nodes for control (`role=airflow-control`) and data (`role=airflow-worker`).
+3. Creates the `airflow` namespace plus hostPath PVs/PVCs for `dags` and `logs`.
+4. Installs/updates Airflow using the official Helm chart and waits for readiness.
+5. Runs `tests/test_poc.sh` which:
+   - Unpauses and triggers the `poc_test` DAG.
+   - Confirms that task pods land on the worker node.
+   - Verifies that log files are written to the shared volume and accessible via `airflow tasks logs`.
 
-Install or upgrade the Airflow release with the included values:
-
-```bash
-helm upgrade --install airflow apache-airflow/airflow \
-  -n airflow -f values.yaml --debug
-```
-
-Wait for all Airflow pods to become ready:
-
-```bash
-kubectl -n airflow wait --for=condition=Ready pod \
-  --selector=app.kubernetes.io/instance=airflow --timeout=5m
-```
-
-List pods and their nodes:
-
-```bash
-kubectl -n airflow get pods -o wide
-```
-
-Check scheduler and webserver logs for errors:
-
-```bash
-kubectl -n airflow logs deploy/airflow-scheduler
-kubectl -n airflow logs deploy/airflow-webserver
-```
-
-All core pods (scheduler, webserver, triggerer, statsd, postgresql) should be in the `Running` state and the scheduler logs should include "Started single scheduler process".
-
-## Accessing the Airflow Web UI
-
-The webserver Service is exposed as a NodePort so that the UI can be reached from the host.
-
-1. Retrieve the port that the cluster assigned:
-
-   ```bash
-   kubectl -n airflow get svc airflow-webserver -o=jsonpath='{.spec.ports[0].nodePort}'
-   ```
-
-2. Open `http://localhost:<NodePort>` in a browser and log in with the default credentials (`admin`/`admin` unless changed).
-3. The home page should list the built-in example DAGs or any test DAGs you deploy.
-
-If you cannot access the Service directly, you can temporarily port‑forward the webserver:
-
+### Accessing the Web UI
+After deployment the webserver can be reached locally:
 ```bash
 kubectl -n airflow port-forward svc/airflow-webserver 8080:8080
 ```
+Navigate to [http://localhost:8080](http://localhost:8080) and log in with the default `admin / admin` credentials.
 
-Then navigate to `http://localhost:8080/`.
-
-
-
-## Monitoring the Cluster and Airflow
-
-### Kubernetes Dashboard
-
-1. Deploy the dashboard:
-   ```bash
-   kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
-   ```
-2. Create an admin service account and cluster role binding:
-   ```bash
-   kubectl apply -f dashboard-adminuser.yaml
-   ```
-3. Get a login token:
-   ```bash
-   kubectl -n kubernetes-dashboard create token admin-user
-   ```
-4. Launch the local proxy and open the UI:
-   ```bash
-   kubectl proxy
-   ```
-   Navigate to:
-   `http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/`
-   Log in with the token and verify that nodes and pods are visible. A 403 error usually indicates missing RBAC permissions.
-
-### Airflow Metrics
-
-`values.yaml` enables StatsD metrics emission:
-
-```yaml
-config:
-  metrics:
-    statsd_on: true
-statsd:
-  enabled: true
-```
-
-1. Port‑forward the StatsD exporter:
-   ```bash
-   kubectl -n airflow port-forward svc/airflow-statsd 9125:9125
-   ```
-2. Query the metrics endpoint:
-   ```bash
-   curl http://localhost:9125/metrics
-   ```
-   Prometheus-style metrics such as `airflow_dag_processing_import_errors` should be returned. An empty response indicates metrics are disabled.
-
-#### Optional: Prometheus
-
-Install a minimal Prometheus server and scrape the Airflow metrics:
-
+## Teardown
 ```bash
-helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm repo update
-helm install monitor prometheus-community/prometheus \
-  --namespace monitoring --create-namespace \
-  --set server.persistentVolume.enabled=false
+make clean
 ```
+This removes the Helm release, deletes the namespace and PVs, and tears down the Minikube cluster.
 
-Add the following scrape configuration (via `server.extraScrapeConfigs` or a ConfigMap):
+## Extending for Production
+- Replace the bundled PostgreSQL with an external managed database.
+- Enable high availability by increasing scheduler and webserver replicas.
+- Integrate an object store (e.g. S3, GCS) for DAGs and logs instead of hostPath volumes.
+- Configure a load balancer or ingress for the webserver.
 
-```yaml
-- job_name: airflow
-  static_configs:
-    - targets:
-      - airflow-statsd.airflow.svc.cluster.local:9125
-```
-
-Port‑forward the Prometheus service to view collected metrics:
-
-```bash
-kubectl -n monitoring port-forward svc/monitor-prometheus-server 9090:9090
-```
-
+## Troubleshooting
+`kubectl -n airflow get pods -o wide` shows where each pod is scheduled.  Logs for failed tasks are available under `logs/` on the host or via `kubectl exec` using `airflow tasks logs`.

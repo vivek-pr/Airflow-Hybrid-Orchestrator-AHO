@@ -1,0 +1,6 @@
+apiVersion: minikube.sigs.k8s.io/v1
+kind: ClusterConfig
+name: airflow-poc
+nodes:
+  - role: control-plane
+  - role: worker
