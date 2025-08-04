@@ -1,22 +1,26 @@
-# Airflow Hybrid Orchestrator POC
+# Airflow External Worker Proof-of-Concept
 
-This repository contains a complete proof‑of‑concept for running **Apache Airflow 3** on a local [Minikube](https://minikube.sigs.k8s.io/) Kubernetes cluster using the **KubernetesExecutor**.  The control plane (Scheduler and Webserver) is pinned to one node while task pods run on a separate worker node, demonstrating a clear separation between orchestration and execution layers.
+This repository demonstrates an **Apache Airflow 3** control plane running inside a local [Minikube](https://minikube.sigs.k8s.io/) Kubernetes cluster while tasks are executed by a **standalone worker** process that lives entirely on the host machine. Airflow uses the `KubernetesExecutor` but instead of running task code in Kubernetes pods, a sample DAG sends an HTTP request to the external worker.
 
 ## Architecture
-- **Control plane** – Airflow Scheduler and Webserver run on the node labelled `role=airflow-control`.
-- **Data plane** – every task is executed as a separate pod scheduled on the node labelled `role=airflow-worker`.
-- **Shared volumes** – DAGs and logs are stored on host directories and exposed to the cluster through `hostPath` PersistentVolumes.
+- **Control plane** – Airflow Scheduler and Webserver run inside the Minikube cluster.
+- **Data plane** – a Python Flask service (`worker/app.py`) runs on the host and performs work when triggered.
+- **Communication** – Airflow tasks call `http://host.minikube.internal:5000/run-task` to request work from the external service.
 
 ## Repository Layout
 ```
-├── Makefile                # one‑click deployment and teardown
-├── minikube-profile.yaml   # example multi‑node Minikube profile
-├── values.yaml             # Helm values overriding the official chart
+├── Makefile               # one‑click entry points
+├── deploy.sh              # provisioning script
+├── teardown.sh            # cleanup script
+├── minikube-profile.yaml  # sample Minikube profile
+├── values.yaml            # Helm values for Airflow
 ├── dags/
-│   └── poc_test_dag.py     # sample DAG with echo and sleep tasks
-├── logs/                   # hostPath log directory
+│   └── external_trigger_dag.py  # DAG that calls the external worker
+├── worker/
+│   ├── app.py             # Flask worker
+│   └── requirements.txt   # worker dependencies
 ├── tests/
-│   └── test_poc.sh         # automated validation script
+│   └── test_external_trigger.sh # validation script
 └── README.md
 ```
 
@@ -24,40 +28,36 @@ This repository contains a complete proof‑of‑concept for running **Apache Ai
 - Linux host with Docker
 - [Minikube](https://minikube.sigs.k8s.io/) 1.32+
 - [Helm](https://helm.sh/) 3.x
-- `kubectl` and `make`
+- `kubectl`, `curl`, and `make`
+- Python 3 for the standalone worker
 
-## One‑Click Deployment
+## One‑Click Usage
 ```bash
-make deploy
+make deploy   # spin up everything, trigger the DAG and run tests
+make test     # re-run validation tests
+make clean    # tear everything down
 ```
-This target performs the following:
-1. Starts Minikube with two nodes and mounts the repository into the cluster.
-2. Labels the nodes for control (`role=airflow-control`) and data (`role=airflow-worker`).
-3. Creates the `airflow` namespace plus hostPath PVs/PVCs for `dags` and `logs`.
-4. Installs/updates Airflow using the official Helm chart and waits for readiness.
-5. Runs `tests/test_poc.sh` which:
-   - Unpauses and triggers the `poc_test` DAG.
-   - Confirms that task pods land on the worker node.
-   - Verifies that log files are written to the shared volume and accessible via `airflow tasks logs`.
+`make deploy` performs the following steps:
+1. Starts Minikube and creates an `airflow` namespace.
+2. Labels the node and provisions hostPath volumes for DAGs and logs.
+3. Installs Airflow via the official Helm chart using the `KubernetesExecutor`.
+4. Launches the standalone worker on the host at `http://localhost:5000`.
+5. Triggers `external_trigger_dag` which POSTs to the worker.
+6. Runs `tests/test_external_trigger.sh` to verify that the worker executed and the DAG completed successfully.
 
-### Accessing the Web UI
-After deployment the webserver can be reached locally:
+The Airflow web UI is exposed via NodePort `32080`:
 ```bash
 kubectl -n airflow port-forward svc/airflow-webserver 8080:8080
+# then browse http://localhost:8080
 ```
-Navigate to [http://localhost:8080](http://localhost:8080) and log in with the default `admin / admin` credentials.
+
+## Extending the POC
+- Secure the worker endpoint with authentication or TLS.
+- Run the worker on a different host and update the DAG URL accordingly.
+- Replace hostPath volumes with object storage for production setups.
 
 ## Teardown
 ```bash
 make clean
 ```
-This removes the Helm release, deletes the namespace and PVs, and tears down the Minikube cluster.
-
-## Extending for Production
-- Replace the bundled PostgreSQL with an external managed database.
-- Enable high availability by increasing scheduler and webserver replicas.
-- Integrate an object store (e.g. S3, GCS) for DAGs and logs instead of hostPath volumes.
-- Configure a load balancer or ingress for the webserver.
-
-## Troubleshooting
-`kubectl -n airflow get pods -o wide` shows where each pod is scheduled.  Logs for failed tasks are available under `logs/` on the host or via `kubectl exec` using `airflow tasks logs`.
+This stops the worker, uninstalls the Helm release, deletes the namespace and volumes, and removes the Minikube cluster.

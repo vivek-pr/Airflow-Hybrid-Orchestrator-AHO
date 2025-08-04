@@ -3,4 +3,3 @@ kind: ClusterConfig
 name: airflow-poc
 nodes:
   - role: control-plane
-  - role: worker
