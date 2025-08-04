@@ -1,0 +1,14 @@
+apiVersion: minikube.sigs.k8s.io/v1
+kind: ClusterConfig
+name: airflow-poc
+nodes:
+  - role: control-plane
+  - role: worker
+  - role: worker
+mounts:
+  - type: bind
+    src: /root/airflow/dags
+    dst: /opt/airflow/dags
+  - type: bind
+    src: /root/airflow/logs
+    dst: /opt/airflow/logs
