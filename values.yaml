@@ -1,0 +1,74 @@
+# values.yaml for Apache Airflow 3 deployment using official Helm chart
+# Configures KubernetesExecutor, persistent volumes, node selectors, service exposure,
+# built-in database and metrics, and minimal resource requests.
+
+image:
+  tag: "3.0.3"
+
+executor: KubernetesExecutor
+
+dags:
+  persistence:
+    enabled: true
+    existingClaim: dags-pvc
+
+logs:
+  persistence:
+    enabled: true
+    existingClaim: logs-pvc
+
+scheduler:
+  nodeSelector:
+    role: airflow-control
+  tolerations:
+    - key: "role"
+      operator: "Equal"
+      value: "airflow-control"
+      effect: "NoSchedule"
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+webserver:
+  nodeSelector:
+    role: airflow-control
+  tolerations:
+    - key: "role"
+      operator: "Equal"
+      value: "airflow-control"
+      effect: "NoSchedule"
+  service:
+    type: NodePort
+    ports:
+      - name: airflow-ui
+        port: 8080
+        targetPort: 8080
+        nodePort: 32080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+workers:
+  nodeSelector:
+    role: airflow-worker
+  tolerations:
+    - key: "role"
+      operator: "Equal"
+      value: "airflow-worker"
+      effect: "NoSchedule"
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+postgresql:
+  enabled: true
+
+config:
+  metrics:
+    statsd_on: true
+
+statsd:
+  enabled: true
