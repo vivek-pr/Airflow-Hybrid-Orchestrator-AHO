@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+worker/worker.log
+worker/worker.pid
+logs/
