@@ -48,3 +48,25 @@ kubectl -n airflow logs deploy/airflow-webserver
 
 All core pods (scheduler, webserver, triggerer, statsd, postgresql) should be in the `Running` state and the scheduler logs should include "Started single scheduler process".
 
+## Accessing the Airflow Web UI
+
+The webserver Service is exposed as a NodePort so that the UI can be reached from the host.
+
+1. Retrieve the port that the cluster assigned:
+
+   ```bash
+   kubectl -n airflow get svc airflow-webserver -o=jsonpath='{.spec.ports[0].nodePort}'
+   ```
+
+2. Open `http://localhost:<NodePort>` in a browser and log in with the default credentials (`admin`/`admin` unless changed).
+3. The home page should list the built-in example DAGs or any test DAGs you deploy.
+
+If you cannot access the Service directly, you can temporarily port‑forward the webserver:
+
+```bash
+kubectl -n airflow port-forward svc/airflow-webserver 8080:8080
+```
+
+Then navigate to `http://localhost:8080/`.
+
+
