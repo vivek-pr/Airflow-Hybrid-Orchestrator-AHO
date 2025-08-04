@@ -70,3 +70,77 @@ kubectl -n airflow port-forward svc/airflow-webserver 8080:8080
 Then navigate to `http://localhost:8080/`.
 
 
+
+## Monitoring the Cluster and Airflow
+
+### Kubernetes Dashboard
+
+1. Deploy the dashboard:
+   ```bash
+   kubectl apply -f https://raw.githubusercontent.com/kubernetes/dashboard/v2.7.0/aio/deploy/recommended.yaml
+   ```
+2. Create an admin service account and cluster role binding:
+   ```bash
+   kubectl apply -f dashboard-adminuser.yaml
+   ```
+3. Get a login token:
+   ```bash
+   kubectl -n kubernetes-dashboard create token admin-user
+   ```
+4. Launch the local proxy and open the UI:
+   ```bash
+   kubectl proxy
+   ```
+   Navigate to:
+   `http://localhost:8001/api/v1/namespaces/kubernetes-dashboard/services/https:kubernetes-dashboard:/proxy/`
+   Log in with the token and verify that nodes and pods are visible. A 403 error usually indicates missing RBAC permissions.
+
+### Airflow Metrics
+
+`values.yaml` enables StatsD metrics emission:
+
+```yaml
+config:
+  metrics:
+    statsd_on: true
+statsd:
+  enabled: true
+```
+
+1. Port‑forward the StatsD exporter:
+   ```bash
+   kubectl -n airflow port-forward svc/airflow-statsd 9125:9125
+   ```
+2. Query the metrics endpoint:
+   ```bash
+   curl http://localhost:9125/metrics
+   ```
+   Prometheus-style metrics such as `airflow_dag_processing_import_errors` should be returned. An empty response indicates metrics are disabled.
+
+#### Optional: Prometheus
+
+Install a minimal Prometheus server and scrape the Airflow metrics:
+
+```bash
+helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
+helm repo update
+helm install monitor prometheus-community/prometheus \
+  --namespace monitoring --create-namespace \
+  --set server.persistentVolume.enabled=false
+```
+
+Add the following scrape configuration (via `server.extraScrapeConfigs` or a ConfigMap):
+
+```yaml
+- job_name: airflow
+  static_configs:
+    - targets:
+      - airflow-statsd.airflow.svc.cluster.local:9125
+```
+
+Port‑forward the Prometheus service to view collected metrics:
+
+```bash
+kubectl -n monitoring port-forward svc/monitor-prometheus-server 9090:9090
+```
+

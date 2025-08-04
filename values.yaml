@@ -1,6 +1,7 @@
+---
 # values.yaml for Apache Airflow 3 deployment using official Helm chart
-# Configures KubernetesExecutor, persistent volumes, node selectors, service exposure,
-# built-in database and metrics, and minimal resource requests.
+# Configures KubernetesExecutor, persistent volumes, node selectors, service
+# exposure, built-in database and metrics, and minimal resource requests.
 
 image:
   tag: "3.0.3"
